@@ -159,6 +159,7 @@ $ ttdwn --json <url> | jq -r '.saved'
 $ ttdwn --info --json <url> | jq '.media.formats[].quality'
 $ ttdwn -i - --quiet -o ./out < links.txt     # read links from stdin
 $ ttdwn --check                               # endpoint diagnostics
+$ ttdwn --webui --port 0                      # browser interface on a free port
 ```
 
 `--json` prints one object per post on stdout:
@@ -175,6 +176,55 @@ $ ttdwn --check                               # endpoint diagnostics
   "media": { "id": "…", "author": {…}, "formats": [ … ], "…": "…" }
 }
 ```
+
+---
+
+## Web interface
+
+Prefer a browser? The same pipeline runs behind a local page.
+
+```sh
+ttdwn --webui            # http://127.0.0.1:8765/
+ttdwn --webui --open     # ...and open it
+ttdwn --webui --port 9000 --host 0.0.0.0
+ttdwn --webui <url>      # pre-fills the link and fetches it on load
+ttdwn-web                # standalone entry point, same flags
+```
+
+Paste a link, press **Fetch**, and the post appears with its full rendition
+ladder — quality, resolution, codec, bitrate, size. Click a row to choose,
+**Preview** to watch the stream in place, **Download** to transfer. The bar
+tracks bytes, speed and elapsed time; when it finishes, **Save file** pulls the
+identical watermark-free MP4 into your browser's download folder. Files are also
+kept in the server's `--output` directory, named by the same template as the
+CLI.
+
+The page is one HTML file with inline CSS and JS: no CDN, no fonts, no
+telemetry, works offline once the server is up. Light and dark themes follow
+`prefers-color-scheme`.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /` | the page |
+| `POST /api/info` | `{"url"}` → post metadata and the ladder |
+| `POST /api/jobs` | `{"url","index"}` → start a transfer |
+| `GET /api/jobs/<id>` | status, bytes, speed, error |
+| `GET /api/jobs/<id>/file` | the finished file, as an attachment |
+| `GET /api/image?u=` | cover proxy, TikTok CDN hosts only |
+| `GET /api/preview?u=&i=` | range-capable stream proxy for `<video>` |
+| `GET /api/health` | version and output directory |
+
+Notes:
+
+* binds to `127.0.0.1` by default; `--host 0.0.0.0` opens it to your LAN and
+  says so in the banner. There is no auth — it is a personal tool, keep it
+  local.
+* at most two transfers run at once; a repeat download of the same post gets
+  `name-2.mp4` instead of overwriting.
+* the stream proxy only ever touches TikTok CDN hosts, so a crafted `?u=` cannot
+  be used to read `169.254.169.254` or a file on disk.
+* photo carousels are not in the web UI (the CLI handles them); the page says so
+  instead of failing silently.
 
 ---
 
@@ -242,6 +292,40 @@ input ──▶ resolve.py ──▶ aweme id + author      (short links followe
 
 ## Troubleshooting
 
+### `SyntaxError: source code string cannot contain null bytes`
+
+The module files were saved as **UTF-16 instead of UTF-8** — every ASCII byte
+is followed by `\x00`, and the interpreter refuses to parse the file. The
+traceback is unhelpful because it does not name the file, and `pip install .`
+succeeds silently: it happily packages the broken bytes.
+
+Usual causes on Windows: saving from an editor set to "Unicode", a PowerShell
+redirect (`>` / `Out-File` write UTF-16LE by default in Windows PowerShell 5.1),
+or moving the files through the clipboard.
+
+Diagnose and repair:
+
+```bat
+python tools\ttdwn_doctor.py D:\Projects\ttdwn
+python tools\ttdwn_doctor.py D:\Projects\ttdwn --fix --backup
+pip uninstall -y ttdwn
+pip install --force-reinstall --no-cache-dir .
+```
+
+Check what Python actually imports, not just your working copy:
+
+```bat
+python -c "import ttdwn,inspect,pathlib;p=pathlib.Path(inspect.getfile(ttdwn)).parent;print(p);[print(f.name,f.stat().st_size,b'\x00' in f.read_bytes()) for f in sorted(p.glob('*.py'))]"
+```
+
+A sane install prints several thousand bytes per module and `False` for every
+file. A wheel of only a few kilobytes also hints at missing modules — the
+doctor lists them.
+
+Prevention: `.editorconfig` and `.gitattributes` in this repo pin `charset =
+utf-8` and `eol = lf`; `tests/test_packaging.py` fails the suite if any module
+ever contains NUL bytes, a BOM, CRLF endings, or goes missing.
+
 | Symptom | Try |
 | --- | --- |
 | `HTTP 403 … signed link expired` | usually transient; ttdwn re-extracts automatically. Otherwise `--retries 5` |
@@ -256,7 +340,7 @@ input ──▶ resolve.py ──▶ aweme id + author      (short links followe
 ## Development
 
 ```sh
-python -m pytest            # 61 tests, all offline (fake sessions + local HTTP server)
+python -m pytest            # 80 tests, all offline (fake sessions + local HTTP server)
 python -m ttdwn --check     # live endpoint diagnostics
 ```
 
@@ -268,100 +352,18 @@ ttdwn/
   resolve.py     input → aweme id (short-link following)
   extract.py     the three sources, normalisation, merging
   formats.py     quality selection
+  webui.py       local web interface (stdlib HTTP server + single-page UI)
   download.py    resumable atomic transfers
   ffmpeg.py      optional remux / audio extraction
   http.py        urllib session: cookies, proxy, retries, streaming
   models.py      Format / Media
   ui.py          monochrome terminal output, progress bar
+tools/ttdwn_doctor.py    encoding / packaging diagnostics (see Troubleshooting)
 tests/           offline suite with payload fixtures
 ```
 
----
-
-## Docker / Web UI
-
-ttdwn includes a web interface for downloading videos without using the terminal.
-
-### Quick start
-
-```sh
-# Build and run
-docker compose up -d
-
-# Open http://localhost:8080 in your browser
-```
-
-### Environment variables
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PORT` | `8080` | Web server port |
-| `DOWNLOAD_DIR` | `/downloads` | Download directory inside container |
-| `MAX_CONCURRENT` | `2` | Max parallel downloads |
-| `LOG_LEVEL` | `INFO` | Log level (DEBUG/INFO/WARNING/ERROR) |
-| `WEBUI_USER` | *(empty)* | Optional HTTP Basic Auth username |
-| `WEBUI_PASSWORD` | *(empty)* | Optional HTTP Basic Auth password |
-
-Create a `.env` file from `.env.example` to customize.
-
-### Using the Web UI
-
-1. Paste a TikTok URL (supports `tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`, `m.tiktok.com`)
-2. Optionally select quality and enable watermark
-3. Click **Download** — progress shows in real time
-4. Completed downloads appear in the list below with **Download** / **Delete** buttons
-
-### API Endpoints
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` | `/healthz` | Health check |
-| `POST` | `/api/download` | Start a download (JSON: `{url, quality?, watermark?}`) |
-| `GET` | `/api/jobs` | List all jobs |
-| `GET` | `/api/jobs/{id}` | Get job status |
-| `GET` | `/api/files` | List downloaded files |
-| `GET` | `/api/files/{name}` | Download a file |
-| `DELETE` | `/api/files/{name}` | Delete a file |
-
-Example with `curl`:
-
-```sh
-# Start a download
-curl -X POST http://localhost:8080/api/download \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://www.tiktok.com/@user/video/123456789", "quality": "720"}'
-
-# Check job status
-curl http://localhost:8080/api/jobs/<job_id>
-
-# List files
-curl http://localhost:8080/api/files
-```
-
-### CLI inside container
-
-```sh
-# Run CLI (web UI stays stopped)
-docker compose run --rm ttdwn ttdwn <url>
-
-# Or with options
-docker compose run --rm ttdwn ttdwn -q 720 --json <url>
-```
-
-### Security notes
-
-- **No authentication by default** — anyone with network access can use the UI and download files. Set `WEBUI_USER` and `WEBUI_PASSWORD` to enable HTTP Basic Auth.
-- The container runs as non-root user (UID 1000).
-- Read-only root filesystem with `tmpfs` for `/tmp`.
-- `no-new-privileges` security option enabled.
-- Only TikTok domains are accepted (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`, `m.tiktok.com`, `tiktokv.com`).
-- Path traversal is prevented — only basename is used for file operations.
-- No `shell=True` anywhere; all subprocess calls use argument lists.
-
-### Personal use only
-
-This tool downloads publicly available TikTok content for personal use. Respect creators, copyright, and TikTok's Terms of Service. Do not use for scraping, redistribution, or commercial purposes.
-
----
+`.gitignore` keeps the repository clean: caches and build output, virtualenvs,
+and — importantly — downloaded media, `.part` files and `cookies.txt`, which
+must never be committed.
 
 MIT licensed.

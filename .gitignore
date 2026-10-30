@@ -1,59 +1,84 @@
-# ttdwn .gitignore
-
-# Python
+# --- Python -----------------------------------------------------------------
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
 *.pyd
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.mypy_cache/
-*.egg-info/
+
+# --- packaging / build ------------------------------------------------------
 build/
 dist/
+*.egg-info/
+*.egg
+*.whl
+MANIFEST
+.eggs/
+pip-wheel-metadata/
 
-# Virtual environments
+# --- virtual environments ---------------------------------------------------
+.venv/
 venv/
 env/
-.env
-.env.*
+ENV/
+.python-version
+*.egg-link
 
-# IDE
-.repowise/
-.vscode/
-.idea/
-*.swp
-*.swo
+# --- test & tooling caches --------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.benchmarks/
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Downloads (generated files)
-downloads/
+# --- ttdwn runtime output ---------------------------------------------------
+# downloaded media and intermediates
 *.mp4
-*.mkv
-*.webm
-*.mov
-*.mp3
 *.m4a
+*.mp3
 *.opus
 *.wav
 *.jpg
 *.jpeg
 *.png
 *.webp
-*.gif
+*.part
+*.tmp.mp4
 
-# Backups
-*backup*.tar.gz
-*backup*.tgz
+# sidecars written by --thumbnail / --metadata / --music
+*.sound.m4a
+*.fs.mp4
 
-# Test artifacts
-tests/__pycache__/
-tests/*.pyc
+# keep artwork that belongs to the repository
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.webp
+!assets/**/*.png
+!assets/**/*.jpg
+!assets/**/*.webp
+
+# --- credentials & local config --------------------------------------------
+# Netscape cookie exports are secrets: never commit them
+cookies.txt
+*cookies*.txt
+.netrc
+
+# --- editors & operating systems -------------------------------------------
+.repowise
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- local scratch ----------------------------------------------------------
+*.log
+links.txt
+out/
+scratch/

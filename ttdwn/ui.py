@@ -74,12 +74,8 @@ C = Color(supports_color())
 
 
 def set_color(enabled: bool) -> None:
-    """Update the shared :class:`Color` in place.
-
-    Modules do ``from .ui import C``, so rebinding the global would leave them
-    holding the old object; mutating it keeps every reference live.
-    """
-    C.__init__(enabled)
+    global C
+    C = Color(enabled)
 
 
 def term_width(default: int = 78, maximum: int = 100) -> int:
