@@ -1,0 +1,42 @@
+# ttdwn Docker Compose
+# Run: docker compose up -d
+
+services:
+  ttdwn:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ttdwn
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ./downloads:/downloads
+    environment:
+      - PORT=8080
+      - DOWNLOAD_DIR=/downloads
+      - MAX_CONCURRENT=${MAX_CONCURRENT:-2}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WEBUI_USER=${WEBUI_USER:-}
+      - WEBUI_PASSWORD=${WEBUI_PASSWORD:-}
+    restart: unless-stopped
+    # Security hardening
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/ttdwn/__pycache__
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    user: "1000:1000"
+
+    # Health check is defined in Dockerfile
+    # healthcheck:
+    #   test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"]
+    #   interval: 30s
+    #   timeout: 5s
+    #   retries: 3
+    #   start_period: 10s
+
+# Optional: run CLI inside container
+# docker compose run --rm ttdwn ttdwn <url>

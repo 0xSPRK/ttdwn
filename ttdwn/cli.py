@@ -706,5 +706,261 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
 
+# ---------------------------------------------------------------------------
+# programmatic API
+# ---------------------------------------------------------------------------
+
+def download_tiktok(
+    url: str,
+    *,
+    output_dir: str | Path = ".",
+    filename: str = DEFAULT_FILENAME,
+    quality: str = "best",
+    max_quality: str | None = None,
+    codec: str | None = None,
+    watermark: bool = False,
+    audio: str | None = None,
+    audio_only: bool = False,
+    remux: bool = False,
+    thumbnail: bool = False,
+    metadata: bool = False,
+    music: bool = False,
+    images: bool | None = None,
+    ua: str | None = None,
+    device: str = "pixel6a",
+    no_mobile: bool = False,
+    no_web: bool = False,
+    proxy: str | None = None,
+    timeout: float = 20.0,
+    retries: int = 3,
+    cookies: str | None = None,
+    max_size: str | None = None,
+    force: bool = False,
+    no_resume: bool = False,
+    verbose: bool = False,
+    json_output: bool = False,
+) -> dict:
+    """Download a single TikTok video programmatically.
+
+    Returns a dict with keys: ok, input, saved, size, seconds, quality, resolution,
+    bitrate, codec, watermark, extras, media (on success) or ok, input, error (on failure).
+    """
+    from argparse import Namespace
+
+    args = Namespace(
+        urls=[url],
+        input=[],
+        output=str(output_dir),
+        filename=filename,
+        out_file=None,
+        force=force,
+        no_resume=no_resume,
+        max_size=max_size,
+        quality=quality,
+        max_quality=max_quality,
+        codec=codec,
+        list=False,
+        watermark=watermark,
+        audio=audio,
+        audio_only=audio_only,
+        remux=remux,
+        thumbnail=thumbnail,
+        metadata=metadata,
+        music=music,
+        images=images,
+        ua=ua,
+        device=device,
+        no_mobile=no_mobile,
+        no_web=no_web,
+        proxy=proxy,
+        timeout=timeout,
+        retries=retries,
+        sleep=0.0,
+        cookies=cookies,
+        json=json_output,
+        info=False,
+        quiet=True,
+        verbose=verbose,
+        no_color=True,
+        no_progress=True,
+        check=False,
+    )
+    if args.no_color:
+        set_color(False)
+    if args.audio_only and not args.audio:
+        args.audio = "mp3"
+    if args.audio and not have_ffmpeg():
+        return {"ok": False, "input": url, "error": "--audio needs ffmpeg on PATH"}
+
+    try:
+        validate_template(args.filename)
+        parse_quality(args.quality)
+        parse_quality(args.max_quality)
+        parse_size(args.max_size)
+        if args.device.lower() not in DEVICES and not args.no_mobile:
+            args.device = "pixel6a"
+        app = App(args)
+        return app.process_single(url)
+    except UsageError as exc:
+        return {"ok": False, "input": url, "error": str(exc)}
+    except TtdwnError as exc:
+        return {"ok": False, "input": url, "error": str(exc)}
+    except Exception as exc:  # pragma: no cover
+        return {"ok": False, "input": url, "error": f"{type(exc).__name__}: {exc}"}
+
+
+# Add process_single method to App class for programmatic use
+def _process_single(self, target: str) -> dict:
+    """Process a single URL and return result dict (for programmatic API)."""
+    out_dir = Path(self.args.output).expanduser()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if self.args.verbose:
+            info(f"resolving {truncate(target, 70)}", prefix="·")
+
+        media = self.extractor.extract(target)
+
+        if self.args.info:
+            if self.args.json:
+                return {"ok": True, "media": media.as_dict()}
+            return {"ok": True, "input": target, "media": media.as_dict()}
+
+        if media.is_photo and self.args.images is not False:
+            return self._handle_photo_programmatic(media, out_dir)
+
+        if media.is_photo and not media.video_formats:
+            raise UsageError("this post is a photo carousel — drop --no-images to fetch the slides")
+
+        sel = pick(
+            media,
+            self.args.quality,
+            allow_watermark=self.args.watermark,
+            max_quality=self.args.max_quality,
+            codec=self.args.codec,
+        )
+        if sel.note:
+            self.verbose(sel.note)
+
+        if self.args.list:
+            return {"ok": True, "input": target, "list_only": True}
+
+        dest = self.destination(media, sel.fmt, out_dir)
+        if self.max_bytes and sel.fmt.size and sel.fmt.size > self.max_bytes:
+            raise UsageError(
+                f"file is {format_bytes(sel.fmt.size)}, above --max-size {format_bytes(self.max_bytes)}"
+            )
+
+        refresh_box: dict[str, Format] = {}
+
+        def refresh() -> Format:
+            self.verbose("signed link expired — refreshing")
+            fresh = self.extractor.extract(media.permalink or media.id)
+            refreshed = pick(fresh, self.args.quality, allow_watermark=self.args.watermark,
+                             max_quality=self.args.max_quality, codec=self.args.codec).fmt
+            refresh_box["fmt"] = refreshed
+            return refreshed
+
+        result = self.downloader.download(
+            sel.fmt,
+            dest,
+            resume=not self.args.no_resume,
+            overwrite=self.args.force,
+            max_bytes=self.max_bytes,
+            refresh=refresh,
+            label="",
+        )
+        final_fmt = refresh_box.get("fmt", sel.fmt)
+
+        notes: list[str] = []
+
+        if self.args.remux:
+            if have_ffmpeg():
+                target_path = path.with_name(path.stem + ".fs.mp4")
+                try:
+                    remuxed = remux(path, target_path, overwrite=True)
+                    os.replace(remuxed, path)
+                    notes.append("faststart")
+                except TtdwnError as exc:
+                    self.verbose(f"remux skipped: {exc}")
+            else:
+                self.verbose("--remux needs ffmpeg; skipped")
+
+        if self.args.audio:
+            if not have_ffmpeg():
+                raise TtdwnError("--audio needs ffmpeg on PATH")
+            try:
+                audio_path = extract_audio(path, fmt=self.args.audio, overwrite=self.args.force)
+                notes.append(f"audio {audio_path.suffix.lstrip('.')}")
+                if self.args.audio_only:
+                    path.unlink(missing_ok=True)
+                    path = audio_path
+            except TtdwnError as exc:
+                self.verbose(f"audio extraction failed: {exc}")
+
+        if self.args.thumbnail and media.cover_urls:
+            try:
+                cover = self.save_sidecar(media.cover_urls, dest.with_suffix(".jpg"), label="cover")
+                notes.append("cover")
+            except TtdwnError as exc:
+                self.verbose(f"cover skipped: {exc}")
+
+        if self.args.music and media.music.get("url"):
+            try:
+                music = self.save_sidecar([media.music["url"]], dest.with_name(dest.stem + ".sound.m4a"),
+                                          label="sound")
+                notes.append("sound")
+            except TtdwnError as exc:
+                self.verbose(f"sound skipped: {exc}")
+
+        if self.args.metadata:
+            meta_path = dest.with_suffix(".json")
+            meta_path.write_text(json.dumps(media.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+            notes.append("metadata")
+
+        path = result.path
+        return {
+            "ok": True,
+            "input": target,
+            "saved": str(path),
+            "size": result.size,
+            "seconds": round(result.seconds, 2),
+            "quality": final_fmt.quality,
+            "resolution": final_fmt.resolution,
+            "bitrate": final_fmt.bitrate,
+            "codec": final_fmt.codec,
+            "watermark": final_fmt.watermarked,
+            "extras": notes,
+            "media": media.as_dict(),
+        }
+    except TtdwnError as exc:
+        return {"ok": False, "input": target, "error": str(exc)}
+    except Exception as exc:  # pragma: no cover
+        return {"ok": False, "input": target, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _handle_photo_programmatic(self, media: Media, out_dir: Path) -> dict:
+    base = render_name(self.args.filename, media, None, index=1, ext="jpg")
+    folder = out_dir / base
+    folder.mkdir(parents=True, exist_ok=True)
+    saved: list[str] = []
+    for i, url in enumerate(media.image_urls, 1):
+        dest = folder / f"{i:02d}.jpg"
+        fmt = Format(width=None, height=None, gear="image", urls=[url])
+        result = self.downloader.download(fmt, dest, overwrite=self.args.force,
+                                          label="", resume=not self.args.no_resume)
+        saved.append(str(result.path))
+    if self.args.metadata:
+        (folder / "metadata.json").write_text(
+            json.dumps(media.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "input": media.permalink or media.id, "kind": "photo",
+            "saved": saved, "count": len(saved), "media": media.as_dict()}
+
+
+# Bind the methods to App
+App.process_single = _process_single
+App._handle_photo_programmatic = _handle_photo_programmatic
+
+
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

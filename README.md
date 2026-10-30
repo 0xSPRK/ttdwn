@@ -276,4 +276,92 @@ ttdwn/
 tests/           offline suite with payload fixtures
 ```
 
+---
+
+## Docker / Web UI
+
+ttdwn includes a web interface for downloading videos without using the terminal.
+
+### Quick start
+
+```sh
+# Build and run
+docker compose up -d
+
+# Open http://localhost:8080 in your browser
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `8080` | Web server port |
+| `DOWNLOAD_DIR` | `/downloads` | Download directory inside container |
+| `MAX_CONCURRENT` | `2` | Max parallel downloads |
+| `LOG_LEVEL` | `INFO` | Log level (DEBUG/INFO/WARNING/ERROR) |
+| `WEBUI_USER` | *(empty)* | Optional HTTP Basic Auth username |
+| `WEBUI_PASSWORD` | *(empty)* | Optional HTTP Basic Auth password |
+
+Create a `.env` file from `.env.example` to customize.
+
+### Using the Web UI
+
+1. Paste a TikTok URL (supports `tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`, `m.tiktok.com`)
+2. Optionally select quality and enable watermark
+3. Click **Download** — progress shows in real time
+4. Completed downloads appear in the list below with **Download** / **Delete** buttons
+
+### API Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/healthz` | Health check |
+| `POST` | `/api/download` | Start a download (JSON: `{url, quality?, watermark?}`) |
+| `GET` | `/api/jobs` | List all jobs |
+| `GET` | `/api/jobs/{id}` | Get job status |
+| `GET` | `/api/files` | List downloaded files |
+| `GET` | `/api/files/{name}` | Download a file |
+| `DELETE` | `/api/files/{name}` | Delete a file |
+
+Example with `curl`:
+
+```sh
+# Start a download
+curl -X POST http://localhost:8080/api/download \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.tiktok.com/@user/video/123456789", "quality": "720"}'
+
+# Check job status
+curl http://localhost:8080/api/jobs/<job_id>
+
+# List files
+curl http://localhost:8080/api/files
+```
+
+### CLI inside container
+
+```sh
+# Run CLI (web UI stays stopped)
+docker compose run --rm ttdwn ttdwn <url>
+
+# Or with options
+docker compose run --rm ttdwn ttdwn -q 720 --json <url>
+```
+
+### Security notes
+
+- **No authentication by default** — anyone with network access can use the UI and download files. Set `WEBUI_USER` and `WEBUI_PASSWORD` to enable HTTP Basic Auth.
+- The container runs as non-root user (UID 1000).
+- Read-only root filesystem with `tmpfs` for `/tmp`.
+- `no-new-privileges` security option enabled.
+- Only TikTok domains are accepted (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`, `m.tiktok.com`, `tiktokv.com`).
+- Path traversal is prevented — only basename is used for file operations.
+- No `shell=True` anywhere; all subprocess calls use argument lists.
+
+### Personal use only
+
+This tool downloads publicly available TikTok content for personal use. Respect creators, copyright, and TikTok's Terms of Service. Do not use for scraping, redistribution, or commercial purposes.
+
+---
+
 MIT licensed.
