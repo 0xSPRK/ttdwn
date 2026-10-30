@@ -11,8 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY pyproject.toml ./
+# Copy source code needed for package build
+COPY pyproject.toml README.md ./
+COPY ttdwn/ ./ttdwn/
+COPY webui/ ./webui/
+
+# Install Python dependencies (including the package itself)
 RUN pip install --no-cache-dir --prefix=/install ".[dev]"
 
 # Runtime stage
