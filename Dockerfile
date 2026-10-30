@@ -62,5 +62,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)" || exit 1
 
-# Default command: run web UI
-CMD ["python", "-m", "webui.main"]
+# Default command: run web UI with uvicorn
+CMD ["uvicorn", "webui.main:app", "--host", "0.0.0.0", "--port", "8080"]
