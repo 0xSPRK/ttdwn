@@ -1,0 +1,62 @@
+# ttdwn .dockerignore
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.mypy_cache
+*.egg-info
+build/
+dist/
+
+# Virtual environments
+venv/
+env/
+.env
+.env.*
+
+# Downloads
+downloads/
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.mp3
+*.m4a
+*.opus
+*.wav
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+
+# Backups
+*backup*.tar.gz
+*backup*.tgz
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test artifacts
+tests/__pycache__/
+tests/*.pyc
