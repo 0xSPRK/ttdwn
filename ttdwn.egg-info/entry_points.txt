@@ -1,0 +1,2 @@
+[console_scripts]
+ttdwn = ttdwn.cli:main
