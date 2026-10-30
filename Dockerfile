@@ -16,8 +16,8 @@ COPY pyproject.toml README.md ./
 COPY ttdwn/ ./ttdwn/
 COPY webui/ ./webui/
 
-# Install Python dependencies (including the package itself)
-RUN pip install --no-cache-dir --prefix=/install ".[dev]"
+# Install Python dependencies (including the package itself and webui extra)
+RUN pip install --no-cache-dir --prefix=/install ".[dev,webui]"
 
 # Runtime stage
 FROM python:3.12-slim
