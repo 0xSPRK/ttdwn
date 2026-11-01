@@ -303,7 +303,6 @@ ttdwn/
   resolve.py     input → aweme id (short-link following)
   extract.py     the three sources, normalisation, merging
   formats.py     quality selection
-  webui.py       local web interface (stdlib HTTP server + single-page UI)
   download.py    resumable atomic transfers
   ffmpeg.py      optional remux / audio extraction
   http.py        urllib session: cookies, proxy, retries, streaming
