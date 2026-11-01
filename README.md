@@ -179,55 +179,6 @@ $ ttdwn --webui --port 0                      # browser interface on a free port
 
 ---
 
-## Web interface
-
-Prefer a browser? The same pipeline runs behind a local page.
-
-```sh
-ttdwn --webui            # http://127.0.0.1:8765/
-ttdwn --webui --open     # ...and open it
-ttdwn --webui --port 9000 --host 0.0.0.0
-ttdwn --webui <url>      # pre-fills the link and fetches it on load
-ttdwn-web                # standalone entry point, same flags
-```
-
-Paste a link, press **Fetch**, and the post appears with its full rendition
-ladder — quality, resolution, codec, bitrate, size. Click a row to choose,
-**Preview** to watch the stream in place, **Download** to transfer. The bar
-tracks bytes, speed and elapsed time; when it finishes, **Save file** pulls the
-identical watermark-free MP4 into your browser's download folder. Files are also
-kept in the server's `--output` directory, named by the same template as the
-CLI.
-
-The page is one HTML file with inline CSS and JS: no CDN, no fonts, no
-telemetry, works offline once the server is up. Light and dark themes follow
-`prefers-color-scheme`.
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /` | the page |
-| `POST /api/info` | `{"url"}` → post metadata and the ladder |
-| `POST /api/jobs` | `{"url","index"}` → start a transfer |
-| `GET /api/jobs/<id>` | status, bytes, speed, error |
-| `GET /api/jobs/<id>/file` | the finished file, as an attachment |
-| `GET /api/image?u=` | cover proxy, TikTok CDN hosts only |
-| `GET /api/preview?u=&i=` | range-capable stream proxy for `<video>` |
-| `GET /api/health` | version and output directory |
-
-Notes:
-
-* binds to `127.0.0.1` by default; `--host 0.0.0.0` opens it to your LAN and
-  says so in the banner. There is no auth — it is a personal tool, keep it
-  local.
-* at most two transfers run at once; a repeat download of the same post gets
-  `name-2.mp4` instead of overwriting.
-* the stream proxy only ever touches TikTok CDN hosts, so a crafted `?u=` cannot
-  be used to read `169.254.169.254` or a file on disk.
-* photo carousels are not in the web UI (the CLI handles them); the page says so
-  instead of failing silently.
-
----
-
 ## How it works
 
 ```
