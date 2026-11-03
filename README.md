@@ -4,7 +4,7 @@ A strict, minimal TikTok downloader for the terminal. No watermark, real
 quality selection, no dependencies.
 
 ```
-ttdwn 1.0.0  ·  no watermark · high quality
+ttdwn 2.0.0  ·  no watermark · high quality
 
 ──────────────────────────────────────────────────────────────────────────────
 7106594312292453675  @tiktok  TikTok
@@ -159,7 +159,6 @@ $ ttdwn --json <url> | jq -r '.saved'
 $ ttdwn --info --json <url> | jq '.media.formats[].quality'
 $ ttdwn -i - --quiet -o ./out < links.txt     # read links from stdin
 $ ttdwn --check                               # endpoint diagnostics
-$ ttdwn --webui --port 0                      # browser interface on a free port
 ```
 
 `--json` prints one object per post on stdout:
@@ -291,7 +290,7 @@ ever contains NUL bytes, a BOM, CRLF endings, or goes missing.
 ## Development
 
 ```sh
-python -m pytest            # 80 tests, all offline (fake sessions + local HTTP server)
+python -m pytest            # offline suite (fake sessions + local HTTP server)
 python -m ttdwn --check     # live endpoint diagnostics
 ```
 

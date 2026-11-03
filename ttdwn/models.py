@@ -114,7 +114,10 @@ class Media:
     @property
     def best(self) -> Format | None:
         formats = self.video_formats
-        return max(formats, key=lambda f: f.sort_key()[1:]) if formats else None
+        return max(
+            formats,
+            key=lambda f: (f.pixels, 1 if f.codec == "h264" else 0, f.bitrate or 0),
+        ) if formats else None
 
     @property
     def video_formats(self) -> list[Format]:

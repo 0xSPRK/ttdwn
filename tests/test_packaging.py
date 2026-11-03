@@ -19,7 +19,7 @@ PACKAGE = pathlib.Path(__file__).resolve().parents[1] / "ttdwn"
 EXPECTED = {
     "__init__.py", "__main__.py", "cli.py", "download.py", "errors.py",
     "extract.py", "ffmpeg.py", "formats.py", "http.py", "models.py",
-    "resolve.py", "ui.py", "webui.py",
+    "resolve.py", "ui.py",
 }
 
 

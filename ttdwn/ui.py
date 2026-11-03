@@ -35,6 +35,10 @@ class Color:
     """ANSI codes, degraded to empty strings when colour is off."""
 
     def __init__(self, enabled: bool) -> None:
+        self.set(enabled)
+
+    def set(self, enabled: bool) -> None:
+        """Reconfigure in place so every module's ``C`` reference stays valid."""
         self.enabled = enabled
         c = self._c
         self.reset = c("0")
@@ -74,8 +78,7 @@ C = Color(supports_color())
 
 
 def set_color(enabled: bool) -> None:
-    global C
-    C = Color(enabled)
+    C.set(enabled)
 
 
 def term_width(default: int = 78, maximum: int = 100) -> int:

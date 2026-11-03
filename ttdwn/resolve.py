@@ -10,7 +10,7 @@ import re
 import urllib.parse
 from dataclasses import dataclass, field
 
-from .errors import ResolveError
+from .errors import DownloadError, ResolveError
 from .http import Session
 
 __all__ = ["Ref", "resolve", "parse_reference", "BROWSER_UA"]
@@ -107,14 +107,17 @@ def resolve(session: Session, text: str, *, max_hops: int = 6) -> Ref:
     hops: list[str] = []
     for _ in range(max_hops):
         hops.append(current)
-        resp = session.get(
-            current,
-            headers={
-                "User-Agent": BROWSER_UA,
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        )
+        try:
+            resp = session.get(
+                current,
+                headers={
+                    "User-Agent": BROWSER_UA,
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+            )
+        except DownloadError as exc:
+            raise ResolveError(f"could not follow short link {current}: {exc}") from None
         try:
             final = resp.raw.geturl()
         finally:

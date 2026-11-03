@@ -34,8 +34,7 @@ def ranked(media: Media, *, allow_watermark: bool = False,
     """Watermark-free renditions, best first."""
     items = [f for f in media.formats if allow_watermark or not f.watermarked]
     if max_quality:
-        capped = [f for f in items if f.short_side and f.short_side <= max_quality]
-        items = capped or sorted(items, key=lambda f: f.pixels)[:1]
+        items = [f for f in items if f.short_side and f.short_side <= max_quality]
     if codec:
         preferred = [f for f in items if f.codec == codec]
         items = preferred or items
@@ -83,10 +82,21 @@ def pick(
     codec: str | None = None,
 ) -> Selection:
     """Choose one rendition. Raises if the post has nothing to download."""
-    cap_kind, cap = parse_quality(max_quality) if max_quality else ("best", None)
-    cap_value = cap if cap_kind == "height" else None
+    if max_quality:
+        cap_kind, cap = parse_quality(max_quality)
+        if cap_kind != "height":
+            raise UsageError("--max-quality expects a height such as 1080")
+        cap_value = cap
+    else:
+        cap_value = None
+    uncapped = ranked(media, allow_watermark=allow_watermark, codec=codec)
     items = ranked(media, allow_watermark=allow_watermark, max_quality=cap_value, codec=codec)
     if not items:
+        if uncapped and cap_value:
+            smallest = min(uncapped, key=_sort_key)
+            raise UsageError(
+                f"no rendition at or below {cap_value}p — the smallest is {smallest.quality}"
+            )
         raise UsageError(f"post {media.id} has no watermark-free video stream")
 
     kind, value = parse_quality(spec)

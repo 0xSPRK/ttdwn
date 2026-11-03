@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from ttdwn.cli import main, parse_size, render_name, validate_template
+from ttdwn.cli import (
+    App,
+    build_parser,
+    format_table,
+    main,
+    parse_size,
+    render_name,
+    validate_template,
+)
 from ttdwn.errors import UsageError
+from ttdwn.formats import pick
 from ttdwn.models import Format, Media
 
 
@@ -27,6 +36,64 @@ def test_filename_tokens():
 def test_unknown_token_is_rejected_before_any_network_work():
     with pytest.raises(UsageError):
         validate_template("{author}_{nope}")
+
+
+def test_malformed_template_is_a_usage_error():
+    with pytest.raises(UsageError):
+        validate_template("{author")
+    assert main(["-f", "{author", "7300000000000000001"]) == 2
+
+
+def test_watermark_rows_are_listed_once():
+    media = make_media()
+    media.formats = [
+        Format(width=1080, height=1920, bitrate=1094429, urls=["https://cdn/clean.mp4"]),
+        Format(width=720, height=720, urls=["https://cdn/wm1.mp4"], watermarked=True),
+        Format(width=720, height=720, urls=["https://cdn/wm2.mp4"], watermarked=True),
+    ]
+    rendered = format_table(media, None, allow_watermark=True)
+    assert rendered.count("watermark") == 2
+
+
+def test_unwritable_output_directory_is_a_usage_error(monkeypatch, tmp_path):
+    def deny(self, *args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("pathlib.Path.mkdir", deny)
+    assert main(["-o", str(tmp_path / "out"), "7300000000000000001"]) == 2
+
+
+def test_list_prints_even_with_quiet(capsys):
+    args = build_parser().parse_args(["--list", "--quiet", "7300000000000000001"])
+    app = App(args)
+    media = make_media()
+    media.formats.append(Format(width=1080, height=1920, bitrate=1094429,
+                                gear="g", urls=["https://cdn/x.mp4"], sources=["web"]))
+    app.emit_list(media, pick(media, "best"))
+    err = capsys.readouterr().err
+    assert "1080p" in err
+    assert "selected" in err
+
+
+def test_list_on_a_photo_post_does_not_download(capsys, tmp_path):
+    args = build_parser().parse_args(["--list", "--quiet", "7300000000000000001"])
+    app = App(args)
+    media = make_media()
+    media.image_urls = ["https://cdn/a.jpg", "https://cdn/b.jpg"]
+
+    class Extractor:
+        def extract(self, target):
+            return media
+
+    class Downloader:
+        def download(self, *args, **kwargs):
+            raise AssertionError("--list must not download photo slides")
+
+    app.extractor = Extractor()
+    app.downloader = Downloader()
+    app.process("7300000000000000001", tmp_path, 1, 1)
+    err = capsys.readouterr().err
+    assert "a.jpg" in err and "b.jpg" in err
 
 
 @pytest.mark.parametrize("raw,expected", [

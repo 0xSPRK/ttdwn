@@ -198,11 +198,12 @@ class MediaServer:
     """Serves a blob with Range support, optional failure injection."""
 
     def __init__(self, body: bytes, *, fail_first: int = 0, ignore_range: bool = False,
-                 deny_after: int | None = None) -> None:
+                 deny_after: int | None = None, wrong_range_start: bool = False) -> None:
         self.body = body
         self.fail_first = fail_first
         self.ignore_range = ignore_range
         self.deny_after = deny_after
+        self.wrong_range_start = wrong_range_start
         self.hits = 0
         self.requests: list[dict[str, Any]] = []
         server = self
@@ -232,11 +233,19 @@ class MediaServer:
                 partial = False
                 if rng and not server.ignore_range and rng.startswith("bytes="):
                     start = int(rng.split("=")[1].split("-")[0])
+                    if start >= len(server.body):
+                        self.send_response(416)
+                        self.send_header("Content-Range", f"bytes */{len(server.body)}")
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
                     partial = True
                 chunk = server.body[start:]
                 self.send_response(206 if partial else 200)
                 if partial:
-                    self.send_header("Content-Range", f"bytes {start}-{len(server.body) - 1}/{len(server.body)}")
+                    reported = 0 if server.wrong_range_start else start
+                    self.send_header("Content-Range",
+                                     f"bytes {reported}-{len(server.body) - 1}/{len(server.body)}")
                 self.send_header("Content-Length", str(len(chunk)))
                 self.send_header("Accept-Ranges", "bytes")
                 self.end_headers()

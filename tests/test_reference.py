@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ttdwn.errors import ResolveError
+from ttdwn.errors import DownloadError, ResolveError
 from ttdwn.resolve import parse_reference, resolve
 
 VIDEO_ID = "7300000000000000001"
@@ -90,3 +90,14 @@ def test_short_link_to_nowhere_reports_clearly():
     session = _RedirectSession("https://www.tiktok.com/404")
     with pytest.raises(ResolveError):
         resolve(session, "https://vm.tiktok.com/ZMdeadend/")
+
+
+class _DeadSession:
+    def get(self, url: str, **kwargs):
+        raise DownloadError("HTTP 404")
+
+
+def test_dead_short_link_is_a_resolve_error_not_a_download_error():
+    with pytest.raises(ResolveError) as caught:
+        resolve(_DeadSession(), "https://vm.tiktok.com/ZMdeadend/")
+    assert caught.value.exit_code == 3

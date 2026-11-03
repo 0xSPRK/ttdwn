@@ -9,6 +9,7 @@ one (``refresh``) and the transfer continues from the last byte.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -34,9 +35,23 @@ CDN_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+_CONTENT_RANGE_RE = re.compile(r"^\s*bytes\s+(?:(\d+)-(\d+)|\*)/(\d+|\*)\s*$", re.I)
 _ILLEGAL = '<>:"/\\|?*\0'
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
              *(f"LPT{i}" for i in range(1, 10))}
+
+
+def _parse_content_range(value: str | None) -> tuple[int | None, int | None]:
+    """Return ``(start, total)`` from a Content-Range header.
+
+    Handles both ``bytes 10-19/100`` and the unsatisfied form ``bytes */100``.
+    """
+    match = _CONTENT_RANGE_RE.match(value or "")
+    if not match:
+        return None, None
+    start = int(match.group(1)) if match.group(1) is not None else None
+    total = int(match.group(3)) if match.group(3) not in (None, "*") else None
+    return start, total
 
 
 def safe_filename(name: str, *, limit: int = 120) -> str:
@@ -168,8 +183,13 @@ class Downloader:
         hint: int | None,
     ) -> int | None:
         offset = part.stat().st_size if part.exists() else 0
-        if hint and offset >= hint > 0:
-            return offset  # nothing left to do
+        if hint and offset:
+            if offset == hint:
+                return offset  # nothing left to do
+            if offset > hint:
+                # a stale or corrupt .part from an older file: start over
+                part.unlink(missing_ok=True)
+                offset = 0
         headers = dict(CDN_HEADERS)
         if extra_headers:
             headers.update(extra_headers)
@@ -187,7 +207,7 @@ class Downloader:
             except DownloadError as exc:
                 errors.append(str(exc))
             offset = part.stat().st_size if part.exists() else 0
-            if hint and offset >= hint:
+            if hint and offset == hint:
                 return offset
         message = "; ".join(dict.fromkeys(errors)) or "transfer failed"
         if expired and expired == len(candidates):
@@ -216,22 +236,34 @@ class Downloader:
             status = resp.status
             if status in (401, 403):
                 raise URLExpired(f"HTTP {status}: signed link expired")
-            if status == 416:  # range past the end: the part is already whole
-                if offset:
+            if status == 416:
+                # The range is unsatisfiable. It means "already complete" only
+                # when the server confirms our part is exactly the full size.
+                _, total = _parse_content_range(resp.header("Content-Range"))
+                if offset and total is not None and offset == total:
                     return offset
+                if offset:
+                    part.unlink(missing_ok=True)
+                    raise DownloadError(
+                        "HTTP 416: partial file does not match the remote size; restarting"
+                    )
                 raise DownloadError("HTTP 416: server rejected the range request")
             if status not in (200, 206):
                 raise DownloadError(f"HTTP {status}")
 
             declared: int | None = None
             if status == 206:
-                content_range = resp.header("Content-Range") or ""
-                if "/" in content_range:
-                    tail = content_range.rsplit("/", 1)[-1].strip()
-                    declared = int(tail) if tail.isdigit() else None
-                if offset == 0:
+                start, total = _parse_content_range(resp.header("Content-Range"))
+                if offset:
+                    if start != offset:
+                        part.unlink(missing_ok=True)
+                        got = "unknown" if start is None else str(start)
+                        raise DownloadError(
+                            f"server resumed at byte {got}, expected {offset}; restarting"
+                        )
+                else:
                     status = 200
-                declared = declared or hint
+                declared = total or hint
             else:
                 declared = resp.content_length or hint
                 offset = 0
@@ -239,11 +271,15 @@ class Downloader:
             mode = "ab" if status == 206 and offset else "wb"
             if mode == "wb":
                 offset = 0
+            if max_bytes and offset > max_bytes:
+                part.unlink(missing_ok=True)
+                raise DownloadError(f"size limit exceeded ({format_bytes(max_bytes)})")
             written = offset
             progress = self.progress_factory(declared, label=label, enabled=not quiet)
             progress.done = offset
             if not quiet:
                 progress.start()
+            limit_hit = False
             try:
                 with open(part, mode) as fh:
                     for block in resp.iter_chunks(self.chunk):
@@ -252,12 +288,14 @@ class Downloader:
                         if not quiet:
                             progress.update(len(block))
                         if max_bytes and written > max_bytes:
-                            raise DownloadError(
-                                f"size limit exceeded ({format_bytes(max_bytes)})"
-                            )
+                            limit_hit = True
+                            break
             finally:
                 if not quiet:
                     progress.finish()
+            if limit_hit:
+                part.unlink(missing_ok=True)
+                raise DownloadError(f"size limit exceeded ({format_bytes(max_bytes)})")
             if declared and written < declared:
                 raise DownloadError(f"short transfer: {written} of {declared} bytes")
             return declared

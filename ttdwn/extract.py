@@ -322,13 +322,10 @@ def _from_mobile(item: dict) -> Media | None:
         urls = _urls(image.get("display_image")) or _urls(image.get("thumbnail"))
         if urls:
             media.image_urls.append(urls[0])
-    if media.image_urls and not video.get("bit_rate"):
-        media.sources.append("mobile")
-
     seen: dict[tuple, Format] = {}
 
     def add(width, height, bitrate, gear, size, urls, codec="h264", watermarked=False):
-        key = (width, height, gear, watermarked)
+        key = (width, height, gear, codec, watermarked)
         fmt = seen.get(key)
         if fmt is None:
             fmt = Format(width=_to_int(width), height=_to_int(height), bitrate=_to_int(bitrate),
@@ -395,7 +392,7 @@ def _from_web(item: dict) -> Media | None:
     seen: dict[tuple, Format] = {}
 
     def add(width, height, bitrate, gear, size, urls, codec="h264", watermarked=False):
-        key = (width, height, gear, watermarked)
+        key = (width, height, gear, codec, watermarked)
         fmt = seen.get(key)
         if fmt is None:
             fmt = Format(width=_to_int(width), height=_to_int(height), bitrate=_to_int(bitrate),
@@ -568,8 +565,9 @@ def _merge(base: Media | None, extra: Media | None) -> Media | None:
     for fmt in extra.formats:
         match = next(
             (f for f in base.formats
-             if f.gear == fmt.gear or (f.quality == fmt.quality and f.watermarked == fmt.watermarked
-                                       and (f.bitrate or 0) == (fmt.bitrate or 0))),
+             if f.watermarked == fmt.watermarked and f.codec == fmt.codec
+             and (f.gear == fmt.gear
+                  or (f.quality == fmt.quality and (f.bitrate or 0) == (fmt.bitrate or 0)))),
             None,
         )
         if match is None:

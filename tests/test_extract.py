@@ -12,8 +12,16 @@ from conftest import (
     web_html,
 )
 from ttdwn.errors import ExtractionError
-from ttdwn.extract import Extractor, _drop_duplicate_streams, _from_mobile, _from_web, _parse_web_item
+from ttdwn.extract import (
+    Extractor,
+    _drop_duplicate_streams,
+    _from_mobile,
+    _from_web,
+    _merge,
+    _parse_web_item,
+)
 from ttdwn.formats import pick
+from ttdwn.models import Format, Media
 
 
 def test_mobile_ladder_keeps_watermark_apart():
@@ -45,6 +53,7 @@ def test_photo_post_parsing():
     assert len(media.image_urls) == 3
     assert media.image_urls[0].endswith("a.jpeg")
     assert media.music["title"] == "sneaky snare"
+    assert media.sources == ["mobile"]
 
 
 def test_web_island_parsing():
@@ -85,7 +94,7 @@ def test_extract_falls_back_to_embed_and_learns_the_author():
         "api-h2.tiktokv.com": {"aweme_list": []},
     })
     media = Extractor(session).extract("7300000000000000001")
-    assert media.formats and media.formats[0].quality == "1024p" or media.formats
+    assert media.formats and media.formats[0].quality == "540p"
     assert media.author == "frogfan"
     assert media.duration_ms == 24400
 
@@ -106,6 +115,19 @@ def test_duplicate_url_sets_collapse():
     assert len(media.formats) < before
     urls = [u for f in media.formats for u in f.urls]
     assert len(urls) == len(set(urls)), "no URL should be listed twice"
+
+
+def test_merge_keeps_different_codecs_apart():
+    base = Media(id="1", author="a")
+    base.formats = [Format(width=576, height=1024, bitrate=500000, gear="g", codec="h264",
+                           urls=["https://cdn/a.mp4"])]
+    extra = Media(id="1", author="a")
+    extra.formats = [Format(width=576, height=1024, bitrate=500000, gear="g", codec="h265",
+                            urls=["https://cdn/b.mp4"])]
+    merged = _merge(base, extra)
+    assert merged is not None
+    assert len(merged.formats) == 2
+    assert {f.codec for f in merged.formats} == {"h264", "h265"}
 
 
 def test_bare_id_uses_mobile_only():

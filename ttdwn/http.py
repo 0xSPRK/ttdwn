@@ -8,7 +8,6 @@ reject requests from a cold jar.
 
 from __future__ import annotations
 
-import gzip
 import http.cookiejar
 import io
 import json
@@ -149,10 +148,12 @@ class Session:
                     raise DownloadError(f"HTTP {resp.status} for {_short(url)}")
             except urllib.error.HTTPError as exc:
                 if exc.code in RETRY_STATUS and attempt + 1 < attempts:
+                    exc.close()
                     last = DownloadError(f"HTTP {exc.code} for {_short(url)}")
                 elif exc.code in allow_status:
                     return Response(exc, url)  # type: ignore[arg-type]
                 else:
+                    exc.close()
                     raise DownloadError(f"HTTP {exc.code} for {_short(url)}" + _hint(exc.code)) from None
             except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as exc:
                 reason = getattr(exc, "reason", exc)
@@ -170,10 +171,8 @@ class Session:
         kwargs.setdefault("headers", {})
         kwargs["headers"] = {"Accept-Encoding": "gzip, deflate", **kwargs["headers"]}
         with self.get(url, **kwargs) as resp:
-            data = _decompress(resp.raw, resp.header("Content-Encoding"))
-            if len(data) > max_bytes:
-                data = data[:max_bytes]
-            return data
+            raw = _read_limited(resp.raw, max_bytes, url)
+            return _decompress(raw, resp.header("Content-Encoding"), max_bytes, url)
 
     def get_json(self, url: str, **kwargs: Any) -> Any:
         data = self.get_bytes(url, **kwargs)
@@ -199,32 +198,49 @@ class Session:
         return self.request("HEAD", url, **kwargs)
 
 
-def _decompress(raw, encoding: str | None) -> bytes:
-    """urllib never decompresses for us, so do it by hand."""
-    encoding = (encoding or "").lower()
-    data = _read_all(raw)
-    if encoding == "gzip":
-        try:
-            return gzip.decompress(data)
-        except OSError:
-            return data
-    if encoding == "deflate":
-        for wbits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
-            try:
-                return zlib.decompress(data, wbits)
-            except zlib.error:
-                continue
-        return data
+def _read_limited(raw, limit: int, url: str) -> bytes:
+    """Read at most ``limit`` bytes, failing instead of buffering a huge body."""
+    buf = io.BytesIO()
+    remaining = limit + 1
+    while remaining > 0:
+        block = raw.read(min(65536, remaining))
+        if not block:
+            break
+        buf.write(block)
+        remaining -= len(block)
+    data = buf.getvalue()
+    if len(data) > limit:
+        raise DownloadError(f"response from {_short(url)} exceeds {limit} bytes")
     return data
 
 
-def _read_all(raw) -> bytes:
-    buf = io.BytesIO()
-    while True:
-        block = raw.read(65536)
-        if not block:
-            return buf.getvalue()
-        buf.write(block)
+def _inflate(data: bytes, wbits: int, limit: int, url: str) -> bytes | None:
+    try:
+        decoder = zlib.decompressobj(wbits)
+        out = decoder.decompress(data, limit + 1)
+        if len(out) > limit or decoder.unconsumed_tail:
+            raise DownloadError(f"response from {_short(url)} exceeds {limit} bytes")
+        out += decoder.flush()
+    except zlib.error:
+        return None
+    if len(out) > limit:
+        raise DownloadError(f"response from {_short(url)} exceeds {limit} bytes")
+    return out
+
+
+def _decompress(data: bytes, encoding: str | None, limit: int, url: str) -> bytes:
+    """Decompress incrementally, enforcing ``limit`` on the decoded size."""
+    encoding = (encoding or "").lower()
+    if encoding == "gzip":
+        out = _inflate(data, 16 + zlib.MAX_WBITS, limit, url)
+        return data if out is None else out
+    if encoding == "deflate":
+        for wbits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
+            out = _inflate(data, wbits, limit, url)
+            if out is not None:
+                return out
+        return data
+    return data
 
 
 def _backoff(attempt: int) -> float:

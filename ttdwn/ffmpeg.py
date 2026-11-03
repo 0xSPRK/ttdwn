@@ -96,6 +96,13 @@ def extract_audio(source: Path, dest: Path | None = None, *, fmt: str = "mp3",
     return dest
 
 
+def _number(value: Any, kind: type, default: Any = 0) -> Any:
+    try:
+        return kind(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 def probe(path: Path) -> dict[str, Any]:
     """Return width/height/duration/codec, or an empty dict if ffprobe is absent."""
     binary = _binary("ffprobe")
@@ -119,7 +126,7 @@ def probe(path: Path) -> dict[str, Any]:
         "height": video.get("height"),
         "codec": video.get("codec_name"),
         "audio_codec": audio.get("codec_name"),
-        "duration": float(fmt.get("duration") or 0) or None,
-        "bitrate": int(fmt.get("bit_rate") or 0) or None,
-        "size": int(fmt.get("size") or 0) or None,
+        "duration": _number(fmt.get("duration"), float) or None,
+        "bitrate": _number(fmt.get("bit_rate"), int) or None,
+        "size": _number(fmt.get("size"), int) or None,
     }

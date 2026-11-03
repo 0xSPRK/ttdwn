@@ -38,7 +38,6 @@ MODULES = [
     "models.py",
     "resolve.py",
     "ui.py",
-    "webui.py",
 ]
 
 OK, BOM, UTF16, NULS, EMPTY, OTHER = "ok", "utf-8+bom", "utf-16", "nul-bytes", "empty", "unknown"

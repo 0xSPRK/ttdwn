@@ -174,7 +174,11 @@ def resolve_ua(value: str | None) -> str | None:
 
 
 def validate_template(template: str) -> None:
-    for _, field, _, _ in string.Formatter().parse(template):
+    try:
+        fields = list(string.Formatter().parse(template))
+    except ValueError as exc:
+        raise UsageError(f"bad filename template '{template}': {exc}") from None
+    for _, field, _, _ in fields:
         if field and field.split(".")[0].split("[")[0] not in TOKENS:
             raise UsageError(
                 f"unknown filename token {{{field}}} — available: "
@@ -184,7 +188,8 @@ def validate_template(template: str) -> None:
 
 def render_name(template: str, media: Media, fmt: Format | None, *, index: int = 1,
                 ext: str = "mp4") -> str:
-    created = _dt.datetime.fromtimestamp(media.created) if media.created else None
+    created = (_dt.datetime.fromtimestamp(media.created, _dt.timezone.utc)
+               if media.created else None)
     values = {
         "id": media.id,
         "author": media.author or "tiktok",
@@ -259,10 +264,10 @@ def post_block(media: Media) -> str:
     return "\n".join(lines)
 
 
-def format_table(media: Media, selection_fmt: Format | None, *, allow_watermark: bool) -> str:
-    formats = ranked(media, allow_watermark=allow_watermark)
-    if allow_watermark:
-        formats = formats + [f for f in media.formats if f.watermarked]
+def format_table(media: Media, selection_fmt: Format | None, *, allow_watermark: bool,
+                 max_quality: int | None = None, codec: str | None = None) -> str:
+    formats = ranked(media, allow_watermark=allow_watermark,
+                     max_quality=max_quality, codec=codec)
     rows: list[list[str]] = []
     for i, fmt in enumerate(formats, 1):
         marker = "→" if selection_fmt is not None and fmt is selection_fmt else " "
@@ -334,8 +339,8 @@ class App:
         if self.args.verbose and not self.quiet:
             info(text, prefix="·")
 
-    def say(self, text: str) -> None:
-        if not self.quiet:
+    def say(self, text: str, *, force: bool = False) -> None:
+        if not self.quiet or force:
             print(text, file=sys.stderr, flush=True)
 
     # -- entry -------------------------------------------------------
@@ -355,7 +360,10 @@ class App:
             raise UsageError("--out-file works with a single link only")
 
         out_dir = Path(args.output).expanduser()
-        out_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise UsageError(f"cannot create output directory {out_dir}: {exc}") from None
 
         for index, target in enumerate(targets, 1):
             if index > 1 and args.sleep:
@@ -434,6 +442,10 @@ class App:
             self.emit_info(media)
             return
 
+        if args.list and media.is_photo and not media.video_formats:
+            self.list_photos(media)
+            return
+
         if media.is_photo and args.images is not False:
             # a photo carousel also carries a music track; the slides are the point
             self.handle_photo(media, out_dir, index)
@@ -452,11 +464,7 @@ class App:
             warn(sel.note)
 
         if args.list:
-            self.say("")
-            self.say(format_table(media, sel.fmt, allow_watermark=args.watermark))
-            self.say("")
-            self.say("  " + C.paint("selected: ", C.dim) + selection_line(sel))
-            self.say("  " + C.paint(f"{sel.available} rendition(s) without watermark", C.dim))
+            self.emit_list(media, sel)
             return
 
         if not self.quiet:
@@ -548,11 +556,15 @@ class App:
             self.verbose(f"metadata {meta_path}")
 
         if args.json:
+            try:
+                final_size = path.stat().st_size
+            except OSError:
+                final_size = result.size
             payload = {
                 "ok": True,
                 "input": target,
                 "saved": str(path),
-                "size": result.size,
+                "size": final_size,
                 "seconds": round(result.seconds, 2),
                 "quality": final_fmt.quality,
                 "resolution": final_fmt.resolution,
@@ -565,6 +577,61 @@ class App:
             print(json.dumps(payload, ensure_ascii=False), flush=True)
         else:
             print(str(path), flush=True)
+
+    # -- listing -----------------------------------------------------
+    def emit_list(self, media: Media, sel) -> None:
+        cap = parse_quality(self.args.max_quality)[1] if self.args.max_quality else None
+        formats = ranked(media, allow_watermark=self.args.watermark,
+                         max_quality=cap, codec=self.args.codec)
+        if self.args.json:
+            selected = next((i for i, f in enumerate(formats, 1) if f is sel.fmt), None)
+            payload = {
+                "ok": True,
+                "input": media.permalink or media.id,
+                "selected": selected,
+                "available": sel.available,
+                "note": sel.note,
+                "formats": [
+                    {
+                        "index": i,
+                        "quality": f.quality,
+                        "resolution": f.resolution,
+                        "bitrate": f.bitrate,
+                        "codec": f.codec,
+                        "size": f.size,
+                        "watermark": f.watermarked,
+                        "urls": f.urls,
+                    }
+                    for i, f in enumerate(formats, 1)
+                ],
+            }
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
+            return
+        self.say("", force=True)
+        self.say(format_table(media, sel.fmt, allow_watermark=self.args.watermark,
+                              max_quality=cap, codec=self.args.codec), force=True)
+        self.say("", force=True)
+        self.say("  " + C.paint("selected: ", C.dim) + selection_line(sel), force=True)
+        scope = "including watermark" if self.args.watermark else "without watermark"
+        self.say("  " + C.paint(f"{sel.available} rendition(s) {scope}", C.dim), force=True)
+
+    def list_photos(self, media: Media) -> None:
+        if self.args.json:
+            payload = {
+                "ok": True,
+                "input": media.permalink or media.id,
+                "kind": "photo",
+                "count": len(media.image_urls),
+                "images": media.image_urls,
+                "media": media.as_dict(),
+            }
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
+            return
+        rows = [[f"{i:02d}", truncate(url, max(20, term_width() - 8))]
+                for i, url in enumerate(media.image_urls, 1)]
+        self.say("", force=True)
+        self.say(table(rows, headers=["#", "photo"]), force=True)
+        self.say("", force=True)
 
     # -- photo posts -------------------------------------------------
     def handle_photo(self, media: Media, out_dir: Path, index: int) -> None:

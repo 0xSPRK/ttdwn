@@ -52,6 +52,38 @@ def test_resume_uses_a_range_request(tmp_path: Path, media_server):
     assert any("range" in r for r in server.requests), "expected a Range header"
 
 
+def test_a_complete_part_is_finished_on_416(tmp_path: Path, media_server):
+    server = media_server(BODY)
+    dest = tmp_path / "video.mp4"
+    (tmp_path / "video.mp4.part").write_bytes(BODY)
+    result = Downloader(Session(retries=1), retries=1, quiet=True).download(
+        fmt_for(server.url), dest)
+    assert result.path == dest
+    assert dest.read_bytes() == BODY
+
+
+def test_a_part_larger_than_the_remote_file_is_discarded_on_416(tmp_path: Path, media_server):
+    server = media_server(BODY)
+    part = tmp_path / "video.mp4.part"
+    part.write_bytes(BODY + b"stale tail")
+    with pytest.raises(DownloadError):
+        Downloader(Session(retries=1), retries=1, quiet=True).download(
+            fmt_for(server.url), tmp_path / "video.mp4")
+    assert not part.exists()
+    assert not (tmp_path / "video.mp4").exists()
+
+
+def test_a_mismatched_range_start_restarts_instead_of_appending(tmp_path: Path, media_server):
+    server = media_server(BODY, wrong_range_start=True)
+    part = tmp_path / "video.mp4.part"
+    part.write_bytes(BODY[: 300_000])
+    with pytest.raises(DownloadError):
+        Downloader(Session(retries=1), retries=1, quiet=True).download(
+            fmt_for(server.url), tmp_path / "video.mp4")
+    assert not part.exists()
+    assert not (tmp_path / "video.mp4").exists()
+
+
 def test_server_ignoring_range_still_produces_a_good_file(tmp_path: Path, media_server):
     server = media_server(BODY, ignore_range=True)
     dest = tmp_path / "video.mp4"
@@ -98,11 +130,12 @@ def test_promo_second_url_is_used_when_the_first_fails(tmp_path: Path, media_ser
     assert result.path.read_bytes() == BODY
 
 
-def test_size_limit_aborts(tmp_path: Path, media_server):
+def test_size_limit_aborts_and_leaves_no_partial_file(tmp_path: Path, media_server):
     server = media_server(BODY)
     with pytest.raises(DownloadError):
         Downloader(Session(retries=1), retries=1, quiet=True).download(
             fmt_for(server.url), tmp_path / "v.mp4", max_bytes=1024)
+    assert not (tmp_path / "v.mp4.part").exists()
 
 
 @pytest.mark.parametrize("raw,expected", [

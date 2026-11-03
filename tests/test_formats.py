@@ -84,6 +84,24 @@ def test_max_quality_caps_the_ladder():
     assert sel.fmt.quality == "720p"
 
 
+def test_max_quality_never_goes_above_the_ceiling():
+    assert ranked(make_media(), max_quality=240) == []
+    with pytest.raises(UsageError):
+        pick(make_media(), "best", max_quality="240")
+
+
+def test_max_quality_rejects_an_index():
+    with pytest.raises(UsageError):
+        pick(make_media(), "best", max_quality="2")
+
+
+def test_media_best_is_the_largest_rendition():
+    best = make_media().best
+    assert best is not None
+    assert best.quality == "1080p"
+    assert best.bitrate == 1094429
+
+
 def test_watermark_is_opt_in():
     media = make_media(with_watermark=True)
     assert all(not f.watermarked for f in ranked(media))
